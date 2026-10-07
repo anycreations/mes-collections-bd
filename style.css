@@ -1,3 +1,4 @@
+[hidden] { display: none !important; }
 /* Mise en page : en-tête collant (titre, compteurs-filtres, jauge), puis la pile des numéros comme une étagère de kiosque. */
 :root {
   --fond: #eef2f8; --surface: #ffffff; --encre: #17223b; --encre-douce: #56607a; --trait: #d5dcea;

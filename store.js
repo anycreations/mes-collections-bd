@@ -105,6 +105,25 @@ function baseFirebase(db, f) {
       await f.deleteDoc(docCollection(code, col));
     },
 
+    /** Reprend les cases d'une ancienne collection perso dans une collection du catalogue, puis la supprime. */
+    async migrerCollection(code, ancien, nouveau, total) {
+      const [vieux, neuf] = await Promise.all([f.getDocs(colNumeros(code, ancien)), f.getDocs(colNumeros(code, nouveau))]);
+      const deja = new Set(neuf.docs.map((d) => d.id));
+      const aCopier = vieux.docs.filter((d) => !deja.has(d.id));
+      for (let i = 0; i < aCopier.length; i += 400) {
+        const lot = f.writeBatch(db);
+        aCopier.slice(i, i + 400).forEach((d) => lot.set(f.doc(colNumeros(code, nouveau), d.id), d.data(), { merge: true }));
+        await lot.commit();
+      }
+      if (total) await f.setDoc(docCollection(code, nouveau), { total }, { merge: true });
+      for (let i = 0; i < vieux.docs.length; i += 400) {
+        const lot = f.writeBatch(db);
+        vieux.docs.slice(i, i + 400).forEach((d) => lot.delete(d.ref));
+        await lot.commit();
+      }
+      await f.deleteDoc(docCollection(code, ancien));
+    },
+
     /** Écrit plusieurs états d'un coup : [[n, etat], …]. */
     async ecrireEtats(code, col, liste, par) {
       for (let i = 0; i < liste.length; i += 400) {
@@ -128,6 +147,8 @@ function baseDemo() {
   for (let n = 1; n <= 40; n++) if (n % 3) g0.tresors[n] = { etat: 'possede', par: 'Exemple' };
   g0.doubleduck[1] = { etat: 'possede' }; g0.doubleduck[2] = { etat: 'remplacer' };
   for (let n = 1; n <= 6; n++) g0.dynastie[n] = { etat: 'possede' };
+  groupes['DEMO-PICSOU'].docs.persoF = { nom: 'Les chroniques de Fantomiald', total: 30, perso: true };
+  g0.persoF = { 1: { etat: 'possede' }, 2: { etat: 'remplacer' } };
   const ecoutes = new Set();
   const notifier = () => ecoutes.forEach((f) => f());
   const g = (code) => groupes[code];
@@ -135,7 +156,7 @@ function baseDemo() {
   return {
     demo: true,
     async groupeExiste(code) { return !!g(code); },
-    async creerGroupe(code) { groupes[code] = { spgTotal: 255, docs: {}, numeros: { spg: {}, tresors: {}, doubleduck: {}, dynastie: {} } }; },
+    async creerGroupe(code) { groupes[code] = { spgTotal: 255, docs: {}, numeros: { spg: {} } }; },
     ecouterCollections(code, rappel) {
       const f = () => g(code) && rappel({ spgTotal: g(code).spgTotal, docs: { ...g(code).docs } });
       ecoutes.add(f); setTimeout(f, 50); return () => ecoutes.delete(f);
@@ -160,6 +181,11 @@ function baseDemo() {
       const id = 'perso' + Date.now();
       g(code).docs[id] = { nom, total, perso: true, creeLe: new Date() }; g(code).numeros[id] = {}; notifier();
       return id;
+    },
+    async migrerCollection(code, ancien, nouveau, total) {
+      const G = g(code); G.numeros[nouveau] = { ...(G.numeros[ancien] || {}), ...(G.numeros[nouveau] || {}) };
+      if (total) G.docs[nouveau] = { ...G.docs[nouveau], total };
+      delete G.docs[ancien]; delete G.numeros[ancien]; notifier();
     },
     async supprimerCollection(code, col) { delete g(code).docs[col]; delete g(code).numeros[col]; notifier(); },
     async ecrireEtats(code, col, liste, par) {

@@ -8,6 +8,8 @@ const lire = (k, d) => { try { const v = localStorage.getItem(k); return v === n
 const ecrire = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
 const normaliser = (c) => String(c || '').toUpperCase().replace(/[^A-Z0-9-]/g, '');
 
+const SITE = 'https://anycreations.github.io/mes-collections-bd/';
+const LIEN_APK = 'https://github.com/anycreations/CollectionSPG-telechargement/releases/latest/download/CollectionSPG.apk';
 const LIBELLES = { possede: "Je l'ai", remplacer: "Je l'ai mais en mauvais état", manquant: "Je ne l'ai pas !" };
 const COURTS = { possede: "Je l'ai", remplacer: 'En mauvais état', manquant: "Je ne l'ai pas" };
 const SIGNES = { possede: '✓', remplacer: '↻', manquant: '✕' };
@@ -29,13 +31,16 @@ const S = {
 };
 
 /** Liste des collections du groupe (catalogue + collections créées). */
+/** Collection du catalogue qui remplace une ancienne collection perso du même nom, ou undefined. */
+const remplacante = (d) => d.perso && CATALOGUE.find((c) => c.alias && String(d.nom || '').toLowerCase().includes(c.alias));
+
 function collections() {
   const docs = S.reglages.docs || {};
   const liste = CATALOGUE.map((c) => ({
     ...c, perso: false,
     total: c.id === 'spg' ? (S.reglages.spgTotal || c.total) : (docs[c.id]?.total || c.total),
   }));
-  Object.entries(docs).filter(([, d]) => d.perso)
+  Object.entries(docs).filter(([, d]) => d.perso && !remplacante(d))
     .sort((a, b) => (a[1].creeLe?.seconds || 0) - (b[1].creeLe?.seconds || 0))
     .forEach(([id, d]) => liste.push({ id, nom: d.nom, court: d.nom, total: d.total || 1, couvertures: 0, perso: true, couleur: '#5D4037' }));
   return liste;
@@ -57,6 +62,7 @@ function couverture(c, n) {
 // ------------------------------------------------------------------ Connexion au groupe
 function arreterEcoutes() { S.ecoutes.forEach((u) => u()); S.ecoutes = []; S.numeros = {}; }
 
+const migrees = new Set();
 function ouvrirGroupe(code) {
   arreterEcoutes();
   S.groupe = code; ecrire('mcb-groupe', code);
@@ -68,7 +74,15 @@ function ouvrirGroupe(code) {
     if (suivies.has(id)) return; suivies.add(id);
     S.ecoutes.push(S.base.ecouterNumeros(code, id, (f) => { S.numeros[id] = f; rendre(); }, surErreur));
   };
-  S.ecoutes.push(S.base.ecouterCollections(code, (r) => { S.reglages = r; collections().forEach((c) => suivre(c.id)); rendre(); }, surErreur));
+  S.ecoutes.push(S.base.ecouterCollections(code, (r) => {
+    S.reglages = r; collections().forEach((c) => suivre(c.id)); rendre();
+    // Une collection créée à la main (ex. « Fantomiald ») devient la collection intégrée, avec ses couvertures.
+    Object.entries(r.docs || {}).forEach(([id, d]) => {
+      const cible = remplacante(d); if (!cible || migrees.has(id)) return; migrees.add(id);
+      const total = (d.total || 0) > cible.total ? d.total : null;
+      S.base.migrerCollection(code, id, cible.id, total).catch(() => migrees.delete(id));
+    });
+  }, surErreur));
   collections().forEach((c) => suivre(c.id));
   rendre();
 }
@@ -132,7 +146,7 @@ function rendreAccueil() {
 function rendreCollections() {
   const tuiles = collections().map((c) => {
     const k = compter(c);
-    const img = couverture(c, Math.min(c.total, c.couvertures || 0)) || couverture(c, 1);
+    const img = couverture(c, 1);
     const pc = c.total ? Math.round(k.possedes / c.total * 100) : 0;
     return `<button class="tuile" data-a="ouvrirCol" data-id="${esc(c.id)}" style="--teinte:${c.couleur}">
       <span class="tuile-image">${img ? `<img src="${esc(img)}" alt="" loading="lazy">` : `<span class="sans-image">${esc(c.court)}</span>`}</span>
@@ -175,6 +189,7 @@ function rendreCollection() {
     app.innerHTML = `
       <header class="barre-haut collante">
         <button class="btn-icone" data-a="retour" aria-label="Retour aux collections">←</button>
+        <button class="btn-icone" data-a="accueil" aria-label="Accueil">⌂</button>
         <div class="titres"><p class="groupe">Groupe ${esc(S.groupe)}</p><h1>${esc(c.nom)}</h1></div>
         <button class="btn-icone" data-a="vue" id="b-vue"></button>
         <button class="btn-icone" data-a="ordre" id="b-ordre" aria-label="Inverser l'ordre">⇅</button>
@@ -288,11 +303,12 @@ function rendreReglagesGroupe() {
     <h2>Réglages</h2>
     <section><h3>Ton prénom</h3><div class="rang"><input id="i-prenom2" value="${esc(S.prenom)}"><button class="btn" data-a="prenom">OK</button></div></section>
     <section><h3>Code du groupe</h3><p class="code">${esc(S.groupe)}</p>
-      <div class="rang"><button class="btn" data-a="copierCode">Copier le code</button></div></section>
+      <div class="rang"><button class="btn" data-a="partager" data-t="code">Partager le code</button>
+        <button class="btn" data-a="partager" data-t="installation">Partager le lien d'installation</button></div></section>
     <section><h3>Mes groupes</h3><div class="puces">${S.mesGroupes.map((g) =>
       `<button class="puce${g === S.groupe ? ' actif' : ''}" data-a="groupe" data-g="${esc(g)}">${esc(g)}</button>`).join('')}</div>
       <div class="rang"><button class="btn" data-a="changerGroupe">Ouvrir un autre groupe</button></div></section>
-    <p class="aide">Vert : je l'ai · orange : je l'ai mais en mauvais état · rouge : je ne l'ai pas.<br>Couvertures : wiki Picsou, Inducks et Bédéthèque.</p>
+    <p class="aide">Vert : je l'ai · orange : je l'ai mais en mauvais état · rouge : je ne l'ai pas.<br>Couvertures : wiki Picsou, Inducks, Bédéthèque et bdovore.</p>
     <div class="rang entre"><span></span><button class="btn" data-a="fermer">Fermer</button></div>`);
 }
 
@@ -362,6 +378,7 @@ document.addEventListener('click', async (ev) => {
     case 'corriger': attenteCreation = null; rendre(); $('#i-code').focus(); break;
     case 'changerGroupe': dlg.close(); quitterGroupe(); break;
     case 'ouvrirCol': S.col = el.dataset.id; S.ecran = 'collection'; S.filtre = 'tous'; S.recherche = ''; scrollTo(0, 0); rendre(); break;
+    case 'accueil': if (dlg.open) dlg.close(); arreterEcoutes(); S.col = null; document.body.dataset.col = ''; S.ecran = 'accueil'; rendre(); scrollTo(0, 0); break;
     case 'retour': S.ecran = 'collections'; S.col = null; document.body.dataset.col = ''; rendre(); scrollTo(0, 0); break;
     case 'nouvelleCol': rendreNouvelleCol(); break;
     case 'reglagesGroupe': rendreReglagesGroupe(); break;
@@ -375,9 +392,14 @@ document.addEventListener('click', async (ev) => {
     case 'couvLien': S.base.definirCouverture(S.groupe, c.id, ficheOuverte, $('#i-lien').value.trim()).then(() => toast('Image enregistrée.')).catch(echec); break;
     case 'couvDefaut': S.base.definirCouverture(S.groupe, c.id, ficheOuverte, null).then(() => toast("Image d'origine rétablie.")).catch(echec); break;
     case 'prenom': { const p = $('#i-prenom2').value.trim(); if (p) { S.prenom = p; ecrire('mcb-prenom', p); toast('Prénom enregistré.'); } break; }
-    case 'copierCode':
-      try { await navigator.clipboard.writeText(S.groupe); toast('Code copié.'); } catch (e) { toast(`Le code est : ${S.groupe}`); }
+    case 'partager': {
+      const texte = el.dataset.t === 'code'
+        ? `Rejoins mes collections dans l'application Mes Collections BD avec le code : ${S.groupe}\nVersion web : ${SITE}`
+        : `Installe l'application Mes Collections BD : ${LIEN_APK}\n(ou la version web : ${SITE})\nPuis rejoins mes collections avec le code : ${S.groupe}`;
+      if (navigator.share && matchMedia('(pointer: coarse)').matches) { try { await navigator.share({ text: texte }); } catch (e) {} break; }
+      try { await navigator.clipboard.writeText(texte); toast('Message copié : colle-le où tu veux.'); } catch (e) { toast(texte); }
       break;
+    }
     case 'total': { const t = c.total + +el.dataset.d; if (t >= 1) { await S.base.definirTotal(S.groupe, c.id, t).catch(echec); rendreReglagesCol(); } break; }
     case 'importer': {
       const etats = lireListe($('#i-import').value); if (!Object.keys(etats).length) return;

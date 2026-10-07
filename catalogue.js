@@ -118,5 +118,23 @@ export const CATALOGUE = [
    "5": "Tome 5",
    "6": "Tome 6"
   }
+ },
+ {
+  "id": "fantomiald",
+  "nom": "Les Chroniques de Fantomiald",
+  "court": "Fantomiald",
+  "total": 39,
+  "couvertures": 39,
+  "couleur": "#4A148C",
+  "alias": "fantomiald"
+ },
+ {
+  "id": "superdonald",
+  "nom": "Super Donald Géant",
+  "court": "SDG",
+  "total": 7,
+  "couvertures": 7,
+  "couleur": "#1565C0",
+  "alias": "super donald"
  }
 ];
